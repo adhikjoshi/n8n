@@ -58,9 +58,8 @@ const paths = computed(() =>
 				:d="path!.d"
 				fill="none"
 				stroke="var(--color--text--tint-2)"
-				stroke-width="1.5"
-				stroke-dasharray="8 4"
-				stroke-linecap="round"
+				stroke-width="2"
+				stroke-dasharray="6 4"
 				:class="$style.line"
 				@click="emit('remove-connection', path!.id)"
 			/>

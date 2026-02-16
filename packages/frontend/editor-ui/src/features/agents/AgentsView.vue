@@ -178,7 +178,7 @@ function onRemoveConnection(lineId: string) {
 <template>
 	<main :class="$style.container">
 		<div :class="$style.header">
-			<N8nHeading bold tag="h2" size="xlarge">Agents</N8nHeading>
+			<N8nHeading bold tag="h2" size="xlarge">Agent OS</N8nHeading>
 			<N8nText color="text-light" size="small"> {{ agentsStore.agents.length }} agents </N8nText>
 			<N8nButton
 				label="+ Add Agent"
@@ -279,13 +279,14 @@ function onRemoveConnection(lineId: string) {
 
 .header {
 	display: flex;
-	align-items: center;
+	align-items: baseline;
 	gap: var(--spacing--xs);
-	padding: var(--spacing--sm) var(--spacing--2xl);
+	padding: var(--spacing--lg) var(--spacing--2xl);
 	border-bottom: var(--border);
 	background: var(--color--background);
 	flex-shrink: 0;
-	z-index: 10;
+	z-index: 1;
+	min-height: var(--spacing--3xl);
 }
 
 .body {
@@ -298,9 +299,9 @@ function onRemoveConnection(lineId: string) {
 	flex: 1;
 	position: relative;
 	overflow: hidden;
-	background-color: var(--color--background);
-	background-image: radial-gradient(circle, var(--color--foreground--tint-2) 1px, transparent 1px);
-	background-size: 24px 24px;
+	background-color: var(--color--background--light-2);
+	background-image: radial-gradient(circle, var(--color--foreground--tint-1) 1px, transparent 1px);
+	background-size: 20px 20px;
 }
 
 .empty {
@@ -310,8 +311,6 @@ function onRemoveConnection(lineId: string) {
 	transform: translate(-50%, -50%);
 	color: var(--color--text--tint-2);
 	font-size: var(--font-size--md);
-	text-align: center;
-	line-height: var(--line-height--xl);
 }
 
 .zonesEmpty {
@@ -320,10 +319,7 @@ function onRemoveConnection(lineId: string) {
 	left: 50%;
 	transform: translateX(-50%);
 	color: var(--color--text--tint-2);
-	font-size: var(--font-size--2xs);
-	background: var(--color--foreground--tint-2);
-	padding: var(--spacing--4xs) var(--spacing--xs);
-	border-radius: var(--radius);
+	font-size: var(--font-size--sm);
 }
 
 .addBtn {
@@ -333,24 +329,22 @@ function onRemoveConnection(lineId: string) {
 .dialogOverlay {
 	position: fixed;
 	inset: 0;
-	background: rgba(0, 0, 0, 0.4);
+	background: rgba(0, 0, 0, 0.3);
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	z-index: 100;
-	backdrop-filter: blur(2px);
 }
 
 .dialog {
 	background: var(--color--background);
-	border: 1px solid var(--color--foreground);
-	border-radius: var(--radius--xl);
-	padding: var(--spacing--xl);
-	width: 380px;
+	border-radius: var(--radius--lg);
+	padding: var(--spacing--lg);
+	width: 360px;
 	display: flex;
 	flex-direction: column;
 	gap: var(--spacing--sm);
-	box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
 }
 
 .dialogField {

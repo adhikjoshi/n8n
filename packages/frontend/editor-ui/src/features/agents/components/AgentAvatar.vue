@@ -57,7 +57,7 @@ const dimensions = computed(() => {
 	align-items: center;
 	justify-content: center;
 	flex-shrink: 0;
-	background: var(--color--foreground);
+	background: var(--color--foreground--tint-2);
 }
 
 .image {
