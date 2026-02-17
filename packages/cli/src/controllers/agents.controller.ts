@@ -10,7 +10,7 @@ import {
 } from '@n8n/db';
 import { RestController, Body, Get, Post, Patch, Param } from '@n8n/decorators';
 import crypto from 'node:crypto';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import {
 	CHAT_TRIGGER_NODE_TYPE,
 	FORM_TRIGGER_NODE_TYPE,
@@ -36,15 +36,7 @@ const LLM_API_KEY = process.env.N8N_AGENT_LLM_API_KEY ?? '';
 const LLM_BASE_URL = process.env.N8N_AGENT_LLM_BASE_URL ?? 'https://api.anthropic.com';
 const LLM_MODEL = process.env.N8N_AGENT_LLM_MODEL ?? 'claude-sonnet-4-5-20250929';
 const MAX_ITERATIONS = 15;
-const MAX_DELEGATION_DEPTH = 2;
 const EXECUTION_TIMEOUT_MS = 120_000;
-
-const AGENT_ROLES: Record<string, string> = {
-	'agent-docs-curator@internal.n8n.local': 'Knowledge Base',
-	'agent-issue-triager@internal.n8n.local': 'Bug Analysis',
-	'agent-qa@internal.n8n.local': 'Test Strategy',
-	'agent-messenger@internal.n8n.local': 'Comms & Alerts',
-};
 
 const SUPPORTED_TRIGGERS: Record<string, string> = {
 	[MANUAL_TRIGGER_NODE_TYPE]: 'Manual Trigger',
@@ -64,6 +56,10 @@ interface TaskStep {
 	workflowName?: string;
 	toAgent?: string;
 	result?: string;
+}
+
+interface IterationBudget {
+	remaining: number;
 }
 
 @RestController('/agents')
@@ -94,12 +90,20 @@ export class AgentsController {
 			role: GLOBAL_MEMBER_ROLE,
 		});
 
+		if (payload.description !== undefined || payload.agentAccessLevel !== undefined) {
+			if (payload.description !== undefined) user.description = payload.description;
+			if (payload.agentAccessLevel !== undefined) user.agentAccessLevel = payload.agentAccessLevel;
+			await this.userRepository.save(user);
+		}
+
 		return {
 			id: user.id,
 			firstName: user.firstName,
 			lastName: user.lastName,
 			email: user.email,
 			avatar: user.avatar,
+			description: user.description,
+			agentAccessLevel: user.agentAccessLevel,
 		};
 	}
 
@@ -122,6 +126,12 @@ export class AgentsController {
 		if (payload.avatar !== undefined) {
 			agent.avatar = payload.avatar;
 		}
+		if (payload.description !== undefined) {
+			agent.description = payload.description;
+		}
+		if (payload.agentAccessLevel !== undefined) {
+			agent.agentAccessLevel = payload.agentAccessLevel;
+		}
 
 		const saved = await this.userRepository.save(agent);
 
@@ -131,6 +141,8 @@ export class AgentsController {
 			lastName: saved.lastName,
 			email: saved.email,
 			avatar: saved.avatar,
+			description: saved.description,
+			agentAccessLevel: saved.agentAccessLevel,
 		};
 	}
 
@@ -172,6 +184,8 @@ export class AgentsController {
 		return {
 			agentId: agentUser.id,
 			agentName: `${agentUser.firstName} ${agentUser.lastName}`.trim(),
+			description: agentUser.description,
+			agentAccessLevel: agentUser.agentAccessLevel,
 			projects: projects.map((p) => ({ id: p.id, name: p.name })),
 			workflows: workflows.map((w) => ({
 				id: w.id,
@@ -186,16 +200,56 @@ export class AgentsController {
 		};
 	}
 
-	@Post('/:agentId/task')
+	@Get('/:agentId/card', { apiKeyAuth: true, allowUnauthenticated: true })
+	async getAgentCard(req: Request, _res: Response, @Param('agentId') agentId: string) {
+		const agent = await this.userRepository.findOneBy({ id: agentId, type: 'agent' });
+
+		if (!agent || agent.agentAccessLevel === 'closed') {
+			throw new NotFoundError(`Agent ${agentId} not found`);
+		}
+
+		const baseUrl = `${req.protocol}://${req.get('host')}`;
+
+		return {
+			id: agent.id,
+			name: agent.firstName,
+			provider: {
+				name: 'n8n',
+				description: agent.description ?? '',
+			},
+			capabilities: {
+				streaming: false,
+				pushNotifications: false,
+				multiTurn: true,
+			},
+			skills: [],
+			interfaces: [
+				{
+					type: 'http+json',
+					url: `${baseUrl}/rest/agents/${agent.id}/task`,
+				},
+			],
+			securitySchemes: {
+				apiKey: {
+					type: 'apiKey',
+					name: 'x-n8n-api-key',
+					in: 'header',
+				},
+			},
+			security: [{ apiKey: [] }],
+		};
+	}
+
+	@Post('/:agentId/task', { apiKeyAuth: true })
 	async dispatchTask(req: AuthenticatedRequest, _res: Response, @Param('agentId') agentId: string) {
 		const { prompt } = req.body as { prompt: string };
-		return await this.executeAgentTask(agentId, prompt, 0);
+		return await this.executeAgentTask(agentId, prompt, { remaining: MAX_ITERATIONS });
 	}
 
 	private async executeAgentTask(
 		agentId: string,
 		prompt: string,
-		depth: number,
+		budget: IterationBudget,
 	): Promise<{ status: string; summary?: string; steps: TaskStep[]; message?: string }> {
 		const agentUser = await this.userRepository.findOne({
 			where: { id: agentId },
@@ -231,31 +285,33 @@ export class AgentsController {
 			active: w.active,
 		}));
 
-		// Fetch other agents for delegation (only if depth allows)
-		const otherAgents: Array<{ firstName: string; role: string }> = [];
-		if (depth < MAX_DELEGATION_DEPTH) {
+		// Fetch other agents for delegation (only if budget allows)
+		const otherAgents: Array<{ firstName: string; description: string }> = [];
+		if (budget.remaining > 0) {
 			const allAgents = await this.userRepository.find({ where: { type: 'agent' } });
 			for (const a of allAgents) {
-				if (a.id !== agentId) {
-					const agentDef = AGENT_ROLES[a.email];
+				if (a.id !== agentId && a.agentAccessLevel !== 'closed') {
 					otherAgents.push({
 						firstName: a.firstName,
-						role: agentDef ?? '',
+						description: a.description ?? '',
 					});
 				}
 			}
 		}
 
+		const canDelegate = budget.remaining > 0 && otherAgents.length > 0;
 		const agentName = `${agentUser.firstName} ${agentUser.lastName}`.trim();
 		const steps: TaskStep[] = [];
 
-		const systemPrompt = buildSystemPrompt(agentName, workflowList, otherAgents, depth);
+		const systemPrompt = buildSystemPrompt(agentName, workflowList, otherAgents, canDelegate);
 		const messages: LlmMessage[] = [
 			{ role: 'system', content: systemPrompt },
 			{ role: 'user', content: prompt },
 		];
 
-		for (let i = 0; i < MAX_ITERATIONS; i++) {
+		while (budget.remaining > 0) {
+			budget.remaining--;
+
 			const llmResponse = await callLlm(messages);
 			messages.push({ role: 'assistant', content: llmResponse });
 
@@ -310,7 +366,7 @@ export class AgentsController {
 				parsed.action === 'send_message' &&
 				parsed.toAgent &&
 				parsed.message &&
-				depth < MAX_DELEGATION_DEPTH
+				canDelegate
 			) {
 				const targetAgent = await this.userRepository.findOne({
 					where: { firstName: parsed.toAgent, type: 'agent' },
@@ -324,9 +380,15 @@ export class AgentsController {
 						role: 'user',
 						content: `Observation: Agent "${parsed.toAgent}" not found. Available agents: ${otherAgents.map((a) => a.firstName).join(', ')}`,
 					});
+				} else if (targetAgent.agentAccessLevel === 'closed') {
+					steps[steps.length - 1].result = 'error';
+					messages.push({
+						role: 'user',
+						content: `Observation: Agent "${parsed.toAgent}" is not accessible.`,
+					});
 				} else {
 					try {
-						const result = await this.executeAgentTask(targetAgent.id, parsed.message, depth + 1);
+						const result = await this.executeAgentTask(targetAgent.id, parsed.message, budget);
 						const observation = `Agent "${parsed.toAgent}" responded: ${result.summary ?? 'No summary'}`;
 						steps[steps.length - 1].result = result.status === 'completed' ? 'success' : 'failed';
 						messages.push({ role: 'user', content: `Observation: ${observation}` });
@@ -340,10 +402,9 @@ export class AgentsController {
 					}
 				}
 			} else {
-				const validActions =
-					depth < MAX_DELEGATION_DEPTH
-						? '"execute_workflow", "send_message", or "complete"'
-						: '"execute_workflow" or "complete"';
+				const validActions = canDelegate
+					? '"execute_workflow", "send_message", or "complete"'
+					: '"execute_workflow" or "complete"';
 				messages.push({
 					role: 'user',
 					content: `Observation: Unknown action. Use ${validActions}.`,
@@ -501,19 +562,21 @@ function buildPinData(node: INode, agentPrompt?: string): IPinData {
 	}
 }
 
-function buildSystemPrompt(
+export function buildSystemPrompt(
 	agentName: string,
 	workflows: Array<{ id: string; name: string; active: boolean }>,
-	otherAgents: Array<{ firstName: string; role: string }>,
-	depth: number,
+	otherAgents: Array<{ firstName: string; description: string }>,
+	canDelegate: boolean,
 ): string {
 	const workflowList = workflows
 		.map((w) => `- ${w.name} (id: ${w.id}, active: ${w.active})`)
 		.join('\n');
 
 	let agentSection = '';
-	if (depth < MAX_DELEGATION_DEPTH && otherAgents.length > 0) {
-		const agentList = otherAgents.map((a) => `- ${a.firstName} (${a.role})`).join('\n');
+	if (canDelegate && otherAgents.length > 0) {
+		const agentList = otherAgents
+			.map((a) => `- ${a.firstName}${a.description ? `: ${a.description}` : ''}`)
+			.join('\n');
 		agentSection = `
 
 You can also delegate tasks to other agents:
@@ -523,10 +586,9 @@ To send a message to another agent:
 {"action": "send_message", "toAgent": "<firstName>", "message": "<what you need them to do>"}`;
 	}
 
-	const validActions =
-		depth < MAX_DELEGATION_DEPTH
-			? '"execute_workflow", "send_message", or "complete"'
-			: '"execute_workflow" or "complete"';
+	const validActions = canDelegate
+		? '"execute_workflow", "send_message", or "complete"'
+		: '"execute_workflow" or "complete"';
 
 	return `You are ${agentName}, an autonomous AI agent in an n8n workflow automation system.
 
@@ -549,7 +611,7 @@ When the task is complete (after seeing all results):
 If asked to run something multiple times, execute it once, wait for the result, then execute again.`;
 }
 
-async function callLlm(messages: LlmMessage[]): Promise<string> {
+export async function callLlm(messages: LlmMessage[]): Promise<string> {
 	// Extract system message — Anthropic puts it as a top-level param
 	const systemMessage = messages.find((m) => m.role === 'system')?.content ?? '';
 	const conversationMessages = messages

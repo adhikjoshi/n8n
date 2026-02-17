@@ -26,6 +26,8 @@ export interface UserResponse {
 	email: string;
 	type?: string;
 	avatar?: string | null;
+	description?: string | null;
+	agentAccessLevel?: 'open' | 'internal' | 'closed' | null;
 }
 
 export interface ZoneLayout {
@@ -46,6 +48,8 @@ export interface ConnectionLine {
 export interface AgentCapabilitiesResponse {
 	agentId: string;
 	agentName: string;
+	description?: string | null;
+	agentAccessLevel?: 'open' | 'internal' | 'closed' | null;
 	projects: Array<{ id: string; name: string }>;
 	workflows: Array<{ id: string; name: string; active: boolean }>;
 	credentials: Array<{ id: string; name: string; type: string }>;

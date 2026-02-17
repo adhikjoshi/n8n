@@ -138,6 +138,7 @@ import { AddWorkflowUnpublishScopeToCustomRoles1769900001000 } from '../common/1
 import { CreateChatHubToolsTable1770000000000 } from '../common/1770000000000-CreateChatHubToolsTable';
 import { AddTypeColumnToUser1770000000000 } from '../common/1770000000000-AddTypeColumnToUser';
 import { AddAvatarColumnToUser1770100000000 } from '../common/1770100000000-AddAvatarColumnToUser';
+import { AddAgentFieldsToUser1771000000000 } from '../common/1771000000000-AddAgentFieldsToUser';
 import type { Migration } from '../migration-types';
 
 const sqliteMigrations: Migration[] = [
@@ -281,6 +282,7 @@ const sqliteMigrations: Migration[] = [
 	CreateChatHubToolsTable1770000000000,
 	AddTypeColumnToUser1770000000000,
 	AddAvatarColumnToUser1770100000000,
+	AddAgentFieldsToUser1771000000000,
 ];
 
 export { sqliteMigrations };

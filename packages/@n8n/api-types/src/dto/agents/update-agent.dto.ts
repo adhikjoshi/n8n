@@ -5,4 +5,6 @@ import { Z } from '../../zod-class';
 export class UpdateAgentDto extends Z.class({
 	firstName: z.string().min(1).max(32).optional(),
 	avatar: z.string().max(255).nullable().optional(),
+	description: z.string().max(500).optional(),
+	agentAccessLevel: z.enum(['open', 'internal', 'closed']).optional(),
 }) {}
